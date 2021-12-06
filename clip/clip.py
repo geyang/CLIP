@@ -10,7 +10,7 @@ from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from tqdm import tqdm
 
-from .model import build_model
+from .model import build_model, convert_weights
 from .simple_tokenizer import SimpleTokenizer as _Tokenizer
 
 try:
@@ -24,7 +24,7 @@ if packaging.version.parse(torch.__version__) < packaging.version.parse("1.7.1")
     warnings.warn("PyTorch version 1.7.1 or higher is recommended")
 
 
-__all__ = ["available_models", "load", "tokenize"]
+__all__ = ["available_models", "load", "tokenize", "export_onnx"]
 _tokenizer = _Tokenizer()
 
 _MODELS = {
@@ -227,3 +227,32 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 77, truncate: b
         result[i, :len(tokens)] = torch.tensor(tokens)
 
     return result
+
+def export_onnx(model_name: str, opset_version: int = 12):
+    save_path = os.path.expanduser(f"~/.cache/clip/clip_{model_name}.onnx")
+    if os.path.exists(save_path) and os.path.isfile(save_path):
+        print(f"model onnx already exsits in {save_path}, skip export")
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model, _ = load(model_name, device=device)
+        convert_weights(model, torch.float)
+        image = torch.zeros((1, 3, 224, 224)).to(device)
+        text = torch.zeros((1, 77), dtype=torch.int64).to(device)
+
+        torch.onnx.export(
+            model,
+            (image, text),                         # model input (or a tuple for multiple inputs)
+            save_path,
+            export_params=True,        # store the trained parameter weights inside the model file
+            opset_version=opset_version,          # the ONNX version to export the model to
+            do_constant_folding=True,  # whether to execute constant folding for optimization
+            input_names=['input_images', 'input_texts'],   # the model's input names
+            output_names=['image_features', 'text_features'], # the model's output names
+            dynamic_axes={                                  # variable length axes
+                'input_images': {0: 'batch_size'},
+                'input_texts': {0: 'batch_size'},
+                'image_features': {0: 'batch_size'},
+                'text_features': {0: 'batch_size'}
+            }
+        )
+    return save_path

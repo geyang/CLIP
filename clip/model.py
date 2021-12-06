@@ -351,18 +351,18 @@ class CLIP(nn.Module):
         # we cast text into float before argmax to avoid the bug in onnx-tensorrt
         # see https://github.com/onnx/onnx-tensorrt/issues/786
         # this casting should be removed once they fixed the bug
-        x = x[torch.arange(x.shape[0]), text.float().argmax(dim=-1)] @ self.text_projection
+        x = x[:, text.float().argmax(dim=-1)] @ self.text_projection
 
         return x
 
     def forward(self, image, text):
         image_features = self.encode_image(image)
         text_features = self.encode_text(text)
+        return image_features, text_features
 
-        # normalized features
+    def compute_logits(self, image_features, text_features):
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
         logits_per_image = logit_scale * image_features @ text_features.t()
@@ -372,28 +372,28 @@ class CLIP(nn.Module):
         return logits_per_image, logits_per_text
 
 
-def convert_weights(model: nn.Module):
+def convert_weights(model: nn.Module, precision=torch.half):
     """Convert applicable model parameters to fp16"""
 
-    def _convert_weights_to_fp16(l):
+    def _convert_weights_to(l):
         if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):
-            l.weight.data = l.weight.data.half()
+            l.weight.data = l.weight.data.to(precision)
             if l.bias is not None:
-                l.bias.data = l.bias.data.half()
+                l.bias.data = l.bias.data.to(precision)
 
         if isinstance(l, nn.MultiheadAttention):
             for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:
                 tensor = getattr(l, attr)
                 if tensor is not None:
-                    tensor.data = tensor.data.half()
+                    tensor.data = tensor.data.to(precision)
 
         for name in ["text_projection", "proj"]:
             if hasattr(l, name):
                 attr = getattr(l, name)
                 if attr is not None:
-                    attr.data = attr.data.half()
+                    attr.data = attr.data.to(precision)
 
-    model.apply(_convert_weights_to_fp16)
+    model.apply(_convert_weights_to)
 
 
 def build_model(state_dict: dict):
