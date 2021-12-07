@@ -336,7 +336,7 @@ class CLIP(nn.Module):
     def encode_image(self, image):
         return self.visual(image.type(self.dtype))
 
-    def encode_text(self, text):
+    def encode_text(self, text, eot_indices):
         x = self.token_embedding(text).type(self.dtype)  # [batch_size, n_ctx, d_model]
 
         x = x + self.positional_embedding.type(self.dtype)
@@ -348,16 +348,13 @@ class CLIP(nn.Module):
         # x.shape = [batch_size, n_ctx, transformer.width]
         # take features from the eot embedding (eot_token is the highest number in each sequence)
 
-        # we cast text into float before argmax to avoid the bug in onnx-tensorrt
-        # see https://github.com/onnx/onnx-tensorrt/issues/786
-        # this casting should be removed once they fixed the bug
-        x = x[:, text.float().argmax(dim=-1)] @ self.text_projection
+        x = x[:, eot_indices] @ self.text_projection
 
         return x
 
-    def forward(self, image, text):
+    def forward(self, image, text, eot_indices):
         image_features = self.encode_image(image)
-        text_features = self.encode_text(text)
+        text_features = self.encode_text(text, eot_indices)
         return image_features, text_features
 
     def compute_logits(self, image_features, text_features):

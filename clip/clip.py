@@ -236,21 +236,23 @@ def export_onnx(model_name: str, opset_version: int = 12):
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model, _ = load(model_name, device=device)
         convert_weights(model, torch.float)
-        image = torch.zeros((1, 3, 224, 224)).to(device)
-        text = torch.zeros((1, 77), dtype=torch.int64).to(device)
+        image = torch.zeros((7, 3, 224, 224)).to(device)
+        text = torch.zeros((7, 77), dtype=torch.int64).to(device)
+        eot_indices = torch.ones((7, ), dtype=torch.int64).to(device)
 
         torch.onnx.export(
             model,
-            (image, text),                         # model input (or a tuple for multiple inputs)
+            (image, text, eot_indices),                         # model input (or a tuple for multiple inputs)
             save_path,
             export_params=True,        # store the trained parameter weights inside the model file
             opset_version=opset_version,          # the ONNX version to export the model to
             do_constant_folding=True,  # whether to execute constant folding for optimization
-            input_names=['input_images', 'input_texts'],   # the model's input names
+            input_names=['input_images', 'input_texts', 'eot_indices'],   # the model's input names
             output_names=['image_features', 'text_features'], # the model's output names
             dynamic_axes={                                  # variable length axes
                 'input_images': {0: 'batch_size'},
                 'input_texts': {0: 'batch_size'},
+                'eot_indices': {0: 'batch_size'},
                 'image_features': {0: 'batch_size'},
                 'text_features': {0: 'batch_size'}
             }
